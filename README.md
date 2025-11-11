@@ -2,19 +2,19 @@
 
 这是一个用于测试和集成多种电机驱动的嵌入式项目（基于 STM32 + HAL + FreeRTOS 架构）。项目目标是：
 
-- 为不同厂商/类型的电机提供统一的挂载接口（Manager），便于解码和统一下发控制命令；
+ - 为 DJI 系列一拖四（one-to-four）电机提供统一的挂载接口（Manager），便于按照 DJI 电机协议解码与下发控制命令；
 - 容易扩展：可以快速添加新的电机驱动实现并挂载到 Manager 上进行测试；
 - 提供基础算法（如 PID）和多线程示例，方便在 RTOS 任务中调度电机读写。
 
 ## 关键特点
 
-- `CanMotorManager`（位于 `App/DjiCANMotorManager/DjiCANMotorManager.hpp`）: 统一管理基于 CAN 总线的电机，负责：
-  - 管理最多 4 个电机实例（可配置数据结构大小），
-  - 将各电机的输出值组装成 CAN 帧并发送（TransmitData），
+ - `CanMotorManager`（位于 `App/DjiCANMotorManager/DjiCANMotorManager.hpp`）: 专门针对 DJI 一拖四 电机设计的 CAN 管理器，负责：
+  - 管理最多 4 个 DJI 电机实例（与 DJI 一拖四的硬件/协议对应），
+  - 将各电机的输出值组装成符合 DJI 协议的 CAN 帧并发送（TransmitData），
   - 接收 CAN 数据并分发到对应电机的 `decode` 接口（dataDecode），
   - 提供添加/删除电机的接口（addMotor/removeMotor/clearMotors）。
 
-- 电机驱动接口（以 `DjiMotor` 为例，定义在 `App/Motor/DjiMotors.hpp`）: 每个电机驱动需要暴露最少的接口以供 Manager 使用（下文有详细要求）。
+ - 电机驱动接口（以 `DjiMotor` 为例，定义在 `App/Motor/DjiMotors.hpp`）: `CanMotorManager` 期望挂载的电机符合 DJI 电机协议/接口（下文有详细要求）。
 
 ## 仓库结构（相关）
 
@@ -64,11 +64,13 @@ CanMotorManager 的职责简述：
 - `TransmitData()` 会读取 `motor->getOutputValue()` 并将其按大端/小端拆分放入发送数组；
 - `dataDecode(motorID, rxdata, len)` 会遍历已注册电机并调用匹配电机的 `decode` 方法。
 
-因此，任何新增的电机驱动需满足 Manager 的最小契约：
+因此，针对 `CanMotorManager` 的新增电机驱动需满足 Manager 的最小契约（基于 DJI 电机接口）：
 
-1. 成员或属性 `motor_id`，用于与 CAN 报文中的 ID 对应；
-2. 方法 `int32_t getOutputValue()` 或等价签名，用于返回要发送给电机的输出（例如速度或转矩指令值）；
-3. 方法 `void decode(const uint8_t *data, uint16_t len)`，用于接受从 CAN 接收到的数据并解析更新电机内部状态（位置、速度、电流等）。
+1. 成员或属性 `motor_id`，与 DJI 电机在 CAN ID 空间中的标识对应；
+2. 方法 `int32_t getOutputValue()` 或等价签名，返回按 DJI 协议打包的控制量（例如速度/电流指令）；
+3. 方法 `void decode(const uint8_t *data, uint16_t len)`，用于解析来自 DJI 电机/控制器的 CAN 数据并更新状态。
+
+注意：`CanMotorManager` 是为 DJI 一拖四 设计，如果你要集成其他厂商或协议的电机，有两种推荐做法：
 
 示例（伪代码）：
 
@@ -107,11 +109,11 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 
 ## 如何添加新的电机驱动
 
-1. 在 `App/Motor/` 下创建新的驱动文件（例如 `MyMotor.hpp/.cpp`），实现或继承项目现有的 `DjiMotor` 接口；
-2. 在驱动中实现 `motor_id`、`getOutputValue()`、`decode(...)` 等方法；
-3. 在初始化代码中创建驱动实例并调用 `CanMotorManager::addMotor()` 挂载；
-4. 在 CAN 接收回调或任务中调用 `CanMotorManager::dataDecode()` 进行分发解析；
-5. 在需要发送控制量时调用 `CanMotorManager::TransmitData()`。
+1. 如果目标是 DJI 电机：在 `App/Motor/` 下创建新的驱动文件（例如 `MyDjiMotor.hpp/.cpp`），实现或继承项目现有的 `DjiMotor` 接口；实现 `motor_id`、`getOutputValue()`、`decode(...)` 等方法；在初始化代码中创建驱动实例并调用 `CanMotorManager::addMotor()` 挂载；在 CAN 接收回调或任务中调用 `CanMotorManager::dataDecode()` 分发解析；在需要发送控制量时调用 `CanMotorManager::TransmitData()`。
+
+2. 如果目标是非 DJI 电机：
+  - 优先考虑写一个 Adapter，将非 DJI 电机的接口适配为 `DjiMotor`（字段与方法映射），然后复用 `CanMotorManager`（适用于协议差异较小场景）；
+  - 若协议差异较大或有特殊帧结构，建议实现一个新的 Manager（按该协议的 ID/帧结构打包/解析 CAN），并在 README 中记录新 Manager 的使用说明。
 
 ## 在 RTOS 任务中使用（建议）
 
