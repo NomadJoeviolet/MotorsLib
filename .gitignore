@@ -1,0 +1,14 @@
+# Ignore build output and CMake build folders
+#
+# - `build/` is the common build output directory produced by many build systems.
+# - `cmake-build*` matches folders like `cmake-build-debug`, `cmake-build-release`, etc.
+
+# Ignore build directory
+build/
+cmake-build-debug-cmakeninjaarm-none-eabi/
+.vscode
+.idea
+
+# Ignore CMake-created build directories (e.g. cmake-build-debug/)
+
+# End of .gitignore
